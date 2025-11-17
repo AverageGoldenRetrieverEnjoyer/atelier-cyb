@@ -1,0 +1,52 @@
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+
+# Python artifacts
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Build / outputs
+outputs/
+reports/
+*.pem
+*.conf
+*.key
+# Large data
+data
+*.pcap
+*.pcap.gz
+*.pcap.lz4
+*.pcap.zip
+*.pcap.7z
+*.pcap.tar
+*.pcap.tar.gz
+*.pcap.tar.lz4
+*.pcap.tar.zip
+*.pcap.tar.7z
+*.pcap.tar.gz.part
+*.pcap.tar.lz4.part
+*.pcap.tar.zip.part
+*.pcap.tar.7z.part
+*.pcap.tar.gz.part.1
+*.pcap.tar.lz4.part.1
+*.pcap.tar.zip.part.1
+*.pcap.tar.7z.part.1
+
+# Databases / models
+*.db
+*.joblib
+
+# Misc
+*.swp
+*.swo
+*.tmp
+*.bak
+
+

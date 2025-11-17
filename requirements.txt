@@ -1,0 +1,10 @@
+# Core scientific stack
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+
+# Progress & utils
+tqdm
+joblib

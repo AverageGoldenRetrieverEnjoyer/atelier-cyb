@@ -1,0 +1,41 @@
+Pipeline en local : 
+
+Recup data : rclone ou telechargement gdrive
+
+rclone copy gdrive:tpot-backup/logs/pcap zip:/home/your_user/tpot-backup/logs/pcap.zip \
+  --checksum \
+  --progress \
+  --transfers=8 \
+  --checkers=16 \
+  --drive-chunk-size=64M \
+  --low-level-retries=10 \
+  --retries=3 \
+  --contimeout=60s \
+  --timeout=300s \
+  --ignore-existing \
+  --verbose
+
+
+On prend les pcaps et on les decompresse 
+unzip + unlz4 
+
+Ensuite on les merge avec mergecap 
+
+
+
+Ensuite on a un gros pcap on le passe en flow avec CICFlowMeter
+
+Ensuite on melange les deux donnees, et on applique un preprocess classique. 
+
+Ensuite on entraine deux modeles, 
+    - Un modele de classification binaire (Attaque, Benin)
+    - Un modele de de detection d'anomalies
+    
+Le modele de detection d'anomalie va fortement etre correle avec le modele binaire.
+
+Ensuite ce qu'on peut faire 
+    - Relier les ID de flow et les payloads en clair (soit parcequ'elles sont lues dans le pcap, soit dans les logs des honeypots)
+    - Premier choix : avec fuzzyhash : 
+        - Recup toutes ces payloads, calculer leur hashflou et ajouter de la metadonnee. 
+        - Entrainer le modele avec du labeling genere par un modele NLP
+    - Directement utiliser un NLP pour detecter les anomalies
