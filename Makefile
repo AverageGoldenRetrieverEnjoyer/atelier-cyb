@@ -20,7 +20,7 @@ install:
 merge-data:
 	@echo ">>> Merging split compressed data files"
 	@echo "    This will merge .lz4 PCAP files and .gz EVE JSON files"
-	@echo "    from data/gdrive/tpot-backup/logs/ into single files"
+	@echo "    from data/logs/pcap/ and data/logs/eve/ into single files"
 	./scripts/merge_data.sh --output $(DATA_DIR)
 
 check-integrity:

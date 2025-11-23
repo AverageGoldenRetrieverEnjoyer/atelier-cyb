@@ -6,7 +6,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PCAP_DIR="${PCAP_DIR:-$REPO_ROOT/data/gdrive/tpot-backup/logs/pcap}"
+PCAP_DIR="${PCAP_DIR:-$REPO_ROOT/data/logs/pcap}"
 REMOTE="${REMOTE:-gdrive:tpot-backup/logs/pcap}"
 
 # Colors

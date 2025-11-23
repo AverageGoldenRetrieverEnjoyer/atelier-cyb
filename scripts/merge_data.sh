@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Default paths (can be overridden with env vars)
-DATA_ROOT="${DATA_ROOT:-$REPO_ROOT/data/gdrive/tpot-backup/logs}"
+DATA_ROOT="${DATA_ROOT:-$REPO_ROOT/data/logs}"
 PCAP_DIR="${PCAP_DIR:-$DATA_ROOT/pcap}"
 EVE_DIR="${EVE_DIR:-$DATA_ROOT/eve}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/data}"
@@ -35,8 +35,8 @@ Merge split compressed data files:
 
 Options:
   -h, --help          Show this help message
-  -p, --pcap-dir DIR  PCAP source directory (default: data/gdrive/tpot-backup/logs/pcap)
-  -e, --eve-dir DIR   EVE source directory (default: data/gdrive/tpot-backup/logs/eve)
+  -p, --pcap-dir DIR  PCAP source directory (default: data/logs/pcap)
+  -e, --eve-dir DIR   EVE source directory (default: data/logs/eve)
   -o, --output DIR    Output directory (default: data/)
   --pcap-only         Only merge PCAP files
   --eve-only          Only merge EVE files

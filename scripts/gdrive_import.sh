@@ -3,7 +3,7 @@ set -euo pipefail
 
 REMOTE="${REMOTE:-gdrive:tpot-backup}"
 REMOTE_SUBPATH="${REMOTE_SUBPATH:-logs}"
-LOCAL_ROOT="${LOCAL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/data/gdrive/tpot-backup}"
+LOCAL_ROOT="${LOCAL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/data/}"
 RCLONE_OPTS=(
   --checksum
   --progress
@@ -24,11 +24,11 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [subpath]
 
-Sync data from rclone remote (default: \$REMOTE/$REMOTE_SUBPATH) into data/gdrive/tpot-backup/.
+Sync data from rclone remote (default: \$REMOTE/$REMOTE_SUBPATH) into data/.
 Override defaults with environment variables:
   REMOTE=gdrive:tpot-backup
   REMOTE_SUBPATH=logs
-  LOCAL_ROOT=/path/to/pourtpot/data/gdrive/tpot-backup
+  LOCAL_ROOT=/path/to/pourtpot/data/
 EOF
 }
 
