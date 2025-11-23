@@ -60,6 +60,30 @@ The Makefile provides two targets:
 
 Both targets assume the required files already exist under `data/`.
 
+### Merging split data files
+
+If you've downloaded data from Google Drive using `scripts/gdrive_import.sh`, the files are split and compressed:
+- PCAP files are in `.lz4` format in `data/gdrive/tpot-backup/logs/pcap/`
+- EVE JSON files are in `.gz` format in `data/gdrive/tpot-backup/logs/eve/`
+
+Use the merge script to combine them into single files:
+
+```bash
+# Merge both PCAP and EVE files
+make merge-data
+
+# Or use the script directly with options
+./scripts/merge_data.sh --output data/
+./scripts/merge_data.sh --pcap-only    # Only merge PCAP
+./scripts/merge_data.sh --eve-only     # Only merge EVE
+```
+
+This will create:
+- `data/merged.pcap` - All PCAP files merged into one
+- `data/merged_eve.json` - All EVE JSON files concatenated
+
+**Note**: Requires `lz4`, `mergecap` (from wireshark-common), and `gunzip`/`zcat`.
+
 ## Visualization outputs
 
 The pipeline automatically generates several PNG charts to include in presentations:
