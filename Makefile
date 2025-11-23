@@ -10,7 +10,7 @@ EVE_SAMPLE := $(DATA_DIR)/eve_sample.json
 
 ANOMALY_PIPELINE := $(SRC)/anomaly_pipeline.py
 
-.PHONY: all demo full install merge-data check-integrity fix-corrupted clean
+.PHONY: all demo full install merge-data check-integrity fix-corrupted connect clean
 
 all: install prepare_data
 
@@ -53,6 +53,14 @@ full_training:
 		--output-dir $(OUTPUT_DIR)/full \
 		--progress \
 		--save-model $(OUTPUT_DIR)/full/models/flow_iforest.joblib
+
+connect:
+	@echo ">>> Connecting to VPN and SSH"
+	@echo "    This will:"
+	@echo "    1. Check/install WireGuard"
+	@echo "    2. Connect to VPN using access_keys/*.conf"
+	@echo "    3. SSH to host using access_keys/*.pem"
+	./scripts/connect_vpn_ssh.sh
 
 clean:
 	@echo ">>> Removing generated artifacts"
