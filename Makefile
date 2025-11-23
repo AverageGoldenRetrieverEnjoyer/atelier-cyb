@@ -33,7 +33,7 @@ fix-corrupted:
 	@echo "    You can run this in the background with: nohup make fix-corrupted &"
 	./scripts/redownload_corrupted.sh
 
-demo:
+demo_training:
 	@echo ">>> Running demo with sample Suricata flows"
 	$(PYTHON) $(ANOMALY_PIPELINE) \
 		--eve $(EVE_SAMPLE) \
@@ -42,7 +42,7 @@ demo:
 		--progress \
 		--save-model $(OUTPUT_DIR)/demo/models/flow_iforest.joblib
 
-full:
+full_training:
 	@echo ">>> Running anomaly pipeline on full dataset"
 	$(PYTHON) $(ANOMALY_PIPELINE) \
 		--eve $(EVE_FULL) \
@@ -57,3 +57,9 @@ clean:
 import-data:
 	@echo ">>> Importing data from Google Drive"
 	./scripts/gdrive_import.sh
+
+download-benin:
+	@echo ">>> Downloading Benin dataset"
+	./scripts/download_benin.sh
+
+prepare_data: import-data check-integrity fix-corrupted download-benin merge-data
