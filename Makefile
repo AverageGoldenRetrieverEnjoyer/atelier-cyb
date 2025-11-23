@@ -12,9 +12,13 @@ ANOMALY_PIPELINE := $(SRC)/anomaly_pipeline.py
 
 .PHONY: all demo full install merge-data check-integrity fix-corrupted clean
 
-all: demo
+all: install prepare_data
 
 install:
+	@echo ">>> Installing dependencies"
+	$(PYTHON) -m venv venv	
+	source venv/bin/activate	
+	@echo ">>> Installing dependencies"
 	$(PYTHON) -m pip install -r requirements.txt
 
 merge-data:
