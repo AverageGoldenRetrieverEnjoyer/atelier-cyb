@@ -1,0 +1,53 @@
+1. Anomaly Detection
+
+Isolation Forest
+
+Detects anomalies by isolating outliers in the feature space.
+
+Works well with high-dimensional data.
+
+Autoencoders
+
+Neural network-based model for reconstruction-based anomaly detection.
+
+High reconstruction error indicates an anomaly (e.g., unusual traffic).
+
+One-Class SVM
+
+A support vector machine that learns the distribution of normal data.
+
+Anomalous data points are classified as outliers.
+
+2. Clustering
+
+K-Means
+
+Divides data into k clusters based on similarity.
+
+Useful for identifying different types of traffic patterns (e.g., normal, attack).
+
+DBSCAN (Density-Based Spatial Clustering)
+
+Identifies clusters based on data density, finding outliers in the process.
+
+Effective for detecting unusual patterns in traffic.
+
+Agglomerative (Hierarchical) Clustering
+
+Builds a hierarchy of clusters by iteratively merging closest data points.
+
+Helps reveal nested structures or relationships in traffic data.
+
+3. Dimensionality Reduction
+
+Principal Component Analysis (PCA)
+
+Reduces the number of features while maintaining variance.
+
+Helps in visualizing data and detecting outliers by focusing on the most significant features.
+
+t-SNE (t-Distributed Stochastic Neighbor Embedding)
+
+Reduces high-dimensional data to 2 or 3 dimensions for visualization.
+
+Can reveal clusters or anomalies by projecting complex data into simpler forms.
