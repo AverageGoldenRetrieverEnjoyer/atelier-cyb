@@ -11,6 +11,10 @@ venv/
 *.pyo
 *.pyd
 *.log
+keys/*
+
+# But don't ignore the directory itself (so it stays in the repo)
+!keys/
 
 # Build / outputs
 outputs/
@@ -18,6 +22,7 @@ reports/
 *.pem
 *.conf
 *.key
+.vscode/*
 # Large data
 data
 *.pcap
