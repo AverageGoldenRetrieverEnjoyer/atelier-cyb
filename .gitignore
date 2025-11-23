@@ -5,24 +5,23 @@ __pycache__/
 .venv/
 venv/
 .env
+.vscode/
 
 # Python artifacts
 *.pyc
 *.pyo
 *.pyd
 *.log
-keys/*
-
-# But don't ignore the directory itself (so it stays in the repo)
-!keys/
 
 # Build / outputs
 outputs/
 reports/
+
+#Keys
 *.pem
 *.conf
 *.key
-.vscode/*
+!access_keys/
 # Large data
 data
 *.pcap
