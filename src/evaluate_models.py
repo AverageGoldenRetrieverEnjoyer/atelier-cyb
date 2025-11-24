@@ -7,7 +7,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import joblib
 import matplotlib
@@ -16,6 +16,7 @@ import pandas as pd
 import seaborn as sns
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
+from tqdm import tqdm
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -324,6 +325,841 @@ def plot_score_relationship(predictions_df: pd.DataFrame, output_dir: Path):
     LOGGER.info(f"Saved: {output_dir / 'if_vs_ae_scores.png'}")
 
 
+def plot_anomaly_alert_correlation(
+    flows_df: pd.DataFrame,
+    predictions_df: pd.DataFrame,
+    output_dir: Path,
+    top_n: int = 20
+):
+    """
+    Plot correlation between detected anomalies and Suricata alerts.
+    Shows which attack types the models recognize.
+    
+    Args:
+        flows_df: DataFrame with flow information and alert correlation
+        predictions_df: DataFrame with model predictions
+        output_dir: Output directory for plots
+        top_n: Number of top alert signatures to display
+    """
+    LOGGER.info("Creating anomaly-alert correlation visualizations...")
+    
+    if "has_alert" not in flows_df.columns or "alert_signatures" not in flows_df.columns:
+        LOGGER.warning("Alert information not available in flows_df. Skipping anomaly-alert correlation plot.")
+        return
+    
+    # Ensure flows_df and predictions_df have matching indices
+    if len(flows_df) != len(predictions_df):
+        LOGGER.warning(f"Flow count mismatch: {len(flows_df)} vs {len(predictions_df)}. Skipping alert correlation plot.")
+        return
+    
+    # Create figure with subplots
+    fig = plt.figure(figsize=(20, 16))
+    gs = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
+    
+    # Get anomaly masks for each model
+    if_anomalies = predictions_df["isolation_forest"] == -1
+    ae_anomalies = predictions_df["autoencoder"] == -1
+    both_anomalies = if_anomalies & ae_anomalies
+    
+    # Get anomaly flows for each model
+    if_anomaly_flows = flows_df[if_anomalies]
+    ae_anomaly_flows = flows_df[ae_anomalies]
+    both_anomaly_flows = flows_df[both_anomalies]
+    
+    # Get flows with alerts
+    if_anomaly_flows_with_alerts = if_anomaly_flows[if_anomaly_flows["has_alert"] == True] if len(if_anomaly_flows) > 0 else pd.DataFrame()
+    ae_anomaly_flows_with_alerts = ae_anomaly_flows[ae_anomaly_flows["has_alert"] == True] if len(ae_anomaly_flows) > 0 else pd.DataFrame()
+    both_anomaly_flows_with_alerts = both_anomaly_flows[both_anomaly_flows["has_alert"] == True] if len(both_anomaly_flows) > 0 else pd.DataFrame()
+    
+    # Helper function to extract and count alert signatures
+    def extract_signatures(alert_signatures_str):
+        """Extract individual signatures from the concatenated string."""
+        if pd.isna(alert_signatures_str) or alert_signatures_str == "":
+            return []
+        # Split by " | " and take first signature if multiple
+        signatures = str(alert_signatures_str).split(" | ")
+        return [s.strip() for s in signatures if s.strip()]
+    
+    # 1. Top alert signatures for Isolation Forest anomalies
+    ax1 = fig.add_subplot(gs[0, 0])
+    
+    if len(if_anomaly_flows_with_alerts) > 0:
+        all_signatures = []
+        for sig_str in if_anomaly_flows_with_alerts["alert_signatures"]:
+            all_signatures.extend(extract_signatures(sig_str))
+        
+        if all_signatures:
+            sig_counts = pd.Series(all_signatures).value_counts().head(top_n)
+            ax1.barh(range(len(sig_counts)), sig_counts.values, color="coral", edgecolor="black")
+            ax1.set_yticks(range(len(sig_counts)))
+            ax1.set_yticklabels(sig_counts.index, fontsize=9)
+            ax1.set_xlabel("Nombre d'anomalies", fontsize=11)
+            ax1.set_title(f"Isolation Forest: Top {len(sig_counts)} Alertes Suricata\n({len(if_anomaly_flows_with_alerts):,} anomalies avec alertes)", 
+                         fontsize=12, fontweight="bold")
+            ax1.grid(True, alpha=0.3, axis="x")
+            ax1.invert_yaxis()
+        else:
+            ax1.text(0.5, 0.5, "Aucune signature d'alerte disponible", 
+                    ha="center", va="center", transform=ax1.transAxes, fontsize=12)
+            ax1.set_title("Isolation Forest: Alertes Suricata", fontsize=12)
+    else:
+        ax1.text(0.5, 0.5, f"Aucune anomalie avec alerte\n({len(if_anomaly_flows):,} anomalies totales)", 
+                ha="center", va="center", transform=ax1.transAxes, fontsize=12)
+        ax1.set_title("Isolation Forest: Alertes Suricata", fontsize=12)
+    
+    # 2. Top alert signatures for Autoencoder anomalies
+    ax2 = fig.add_subplot(gs[0, 1])
+    
+    if len(ae_anomaly_flows_with_alerts) > 0:
+        all_signatures = []
+        for sig_str in ae_anomaly_flows_with_alerts["alert_signatures"]:
+            all_signatures.extend(extract_signatures(sig_str))
+        
+        if all_signatures:
+            sig_counts = pd.Series(all_signatures).value_counts().head(top_n)
+            ax2.barh(range(len(sig_counts)), sig_counts.values, color="lightblue", edgecolor="black")
+            ax2.set_yticks(range(len(sig_counts)))
+            ax2.set_yticklabels(sig_counts.index, fontsize=9)
+            ax2.set_xlabel("Nombre d'anomalies", fontsize=11)
+            ax2.set_title(f"Autoencoder: Top {len(sig_counts)} Alertes Suricata\n({len(ae_anomaly_flows_with_alerts):,} anomalies avec alertes)", 
+                         fontsize=12, fontweight="bold")
+            ax2.grid(True, alpha=0.3, axis="x")
+            ax2.invert_yaxis()
+        else:
+            ax2.text(0.5, 0.5, "Aucune signature d'alerte disponible", 
+                    ha="center", va="center", transform=ax2.transAxes, fontsize=12)
+            ax2.set_title("Autoencoder: Alertes Suricata", fontsize=12)
+    else:
+        ax2.text(0.5, 0.5, f"Aucune anomalie avec alerte\n({len(ae_anomaly_flows):,} anomalies totales)", 
+                ha="center", va="center", transform=ax2.transAxes, fontsize=12)
+        ax2.set_title("Autoencoder: Alertes Suricata", fontsize=12)
+    
+    # 3. Alert categories distribution for IF anomalies
+    ax3 = fig.add_subplot(gs[1, 0])
+    if "alert_categories" in if_anomaly_flows_with_alerts.columns and len(if_anomaly_flows_with_alerts) > 0:
+        all_categories = []
+        for cat_str in if_anomaly_flows_with_alerts["alert_categories"]:
+            if pd.notna(cat_str) and cat_str != "":
+                categories = str(cat_str).split(" | ")
+                all_categories.extend([c.strip() for c in categories if c.strip()])
+        
+        if all_categories:
+            cat_counts = pd.Series(all_categories).value_counts().head(15)
+            ax3.barh(range(len(cat_counts)), cat_counts.values, color="coral", edgecolor="black", alpha=0.7)
+            ax3.set_yticks(range(len(cat_counts)))
+            ax3.set_yticklabels(cat_counts.index, fontsize=9)
+            ax3.set_xlabel("Nombre d'anomalies", fontsize=11)
+            ax3.set_title("Isolation Forest: Catégories d'Alertes", fontsize=12, fontweight="bold")
+            ax3.grid(True, alpha=0.3, axis="x")
+            ax3.invert_yaxis()
+        else:
+            ax3.text(0.5, 0.5, "Aucune catégorie disponible", 
+                    ha="center", va="center", transform=ax3.transAxes, fontsize=12)
+            ax3.set_title("Isolation Forest: Catégories d'Alertes", fontsize=12)
+    else:
+        ax3.text(0.5, 0.5, "Aucune donnée disponible", 
+                ha="center", va="center", transform=ax3.transAxes, fontsize=12)
+        ax3.set_title("Isolation Forest: Catégories d'Alertes", fontsize=12)
+    
+    # 4. Alert categories distribution for AE anomalies
+    ax4 = fig.add_subplot(gs[1, 1])
+    if "alert_categories" in ae_anomaly_flows_with_alerts.columns and len(ae_anomaly_flows_with_alerts) > 0:
+        all_categories = []
+        for cat_str in ae_anomaly_flows_with_alerts["alert_categories"]:
+            if pd.notna(cat_str) and cat_str != "":
+                categories = str(cat_str).split(" | ")
+                all_categories.extend([c.strip() for c in categories if c.strip()])
+        
+        if all_categories:
+            cat_counts = pd.Series(all_categories).value_counts().head(15)
+            ax4.barh(range(len(cat_counts)), cat_counts.values, color="lightblue", edgecolor="black", alpha=0.7)
+            ax4.set_yticks(range(len(cat_counts)))
+            ax4.set_yticklabels(cat_counts.index, fontsize=9)
+            ax4.set_xlabel("Nombre d'anomalies", fontsize=11)
+            ax4.set_title("Autoencoder: Catégories d'Alertes", fontsize=12, fontweight="bold")
+            ax4.grid(True, alpha=0.3, axis="x")
+            ax4.invert_yaxis()
+        else:
+            ax4.text(0.5, 0.5, "Aucune catégorie disponible", 
+                    ha="center", va="center", transform=ax4.transAxes, fontsize=12)
+            ax4.set_title("Autoencoder: Catégories d'Alertes", fontsize=12)
+    else:
+        ax4.text(0.5, 0.5, "Aucune donnée disponible", 
+                ha="center", va="center", transform=ax4.transAxes, fontsize=12)
+        ax4.set_title("Autoencoder: Catégories d'Alertes", fontsize=12)
+    
+    # 5. Comparison: Anomalies with vs without alerts
+    ax5 = fig.add_subplot(gs[2, 0])
+    if_with_alerts = if_anomaly_flows["has_alert"].sum()
+    if_without_alerts = len(if_anomaly_flows) - if_with_alerts
+    ae_with_alerts = ae_anomaly_flows["has_alert"].sum()
+    ae_without_alerts = len(ae_anomaly_flows) - ae_with_alerts
+    
+    x = np.arange(2)
+    width = 0.35
+    ax5.bar(x - width/2, [if_with_alerts, ae_with_alerts], width, 
+            label="Avec alertes", color="red", edgecolor="black", alpha=0.7)
+    ax5.bar(x + width/2, [if_without_alerts, ae_without_alerts], width,
+            label="Sans alertes", color="gray", edgecolor="black", alpha=0.7)
+    ax5.set_xlabel("Modèle", fontsize=11)
+    ax5.set_ylabel("Nombre d'anomalies", fontsize=11)
+    ax5.set_title("Anomalies avec/sans Alertes Suricata", fontsize=12, fontweight="bold")
+    ax5.set_xticks(x)
+    ax5.set_xticklabels(["Isolation Forest", "Autoencoder"])
+    ax5.legend()
+    ax5.grid(True, alpha=0.3, axis="y")
+    
+    # Add value labels on bars
+    for i, (with_alert, without_alert) in enumerate([(if_with_alerts, if_without_alerts), 
+                                                       (ae_with_alerts, ae_without_alerts)]):
+        ax5.text(i - width/2, with_alert + max(if_with_alerts, ae_with_alerts) * 0.01, 
+                f"{with_alert:,}", ha="center", va="bottom", fontsize=9)
+        ax5.text(i + width/2, without_alert + max(if_without_alerts, ae_without_alerts) * 0.01,
+                f"{without_alert:,}", ha="center", va="bottom", fontsize=9)
+    
+    # 6. Top signatures for anomalies detected by both models
+    ax6 = fig.add_subplot(gs[2, 1])
+    
+    if len(both_anomaly_flows_with_alerts) > 0:
+        all_signatures = []
+        for sig_str in both_anomaly_flows_with_alerts["alert_signatures"]:
+            all_signatures.extend(extract_signatures(sig_str))
+        
+        if all_signatures:
+            sig_counts = pd.Series(all_signatures).value_counts().head(top_n)
+            ax6.barh(range(len(sig_counts)), sig_counts.values, color="purple", edgecolor="black", alpha=0.7)
+            ax6.set_yticks(range(len(sig_counts)))
+            ax6.set_yticklabels(sig_counts.index, fontsize=9)
+            ax6.set_xlabel("Nombre d'anomalies", fontsize=11)
+            ax6.set_title(f"Modèles en Accord: Top {len(sig_counts)} Alertes\n({len(both_anomaly_flows_with_alerts):,} anomalies avec alertes)", 
+                         fontsize=12, fontweight="bold")
+            ax6.grid(True, alpha=0.3, axis="x")
+            ax6.invert_yaxis()
+        else:
+            ax6.text(0.5, 0.5, "Aucune signature d'alerte disponible", 
+                    ha="center", va="center", transform=ax6.transAxes, fontsize=12)
+            ax6.set_title("Modèles en Accord: Alertes Suricata", fontsize=12)
+    else:
+        ax6.text(0.5, 0.5, f"Aucune anomalie avec alerte\n({len(both_anomaly_flows):,} anomalies totales)", 
+                ha="center", va="center", transform=ax6.transAxes, fontsize=12)
+        ax6.set_title("Modèles en Accord: Alertes Suricata", fontsize=12)
+    
+    plt.suptitle("Corrélation Anomalies Détectées / Alertes Suricata", 
+                fontsize=16, fontweight="bold", y=0.995)
+    plt.savefig(output_dir / "anomaly_alert_correlation.png", dpi=200, bbox_inches="tight")
+    plt.close()
+    LOGGER.info(f"Saved: {output_dir / 'anomaly_alert_correlation.png'}")
+
+
+def load_suricata_alerts(eve_path: Path, show_progress: bool = False) -> pd.DataFrame:
+    """Load Suricata alerts from eve.json file."""
+    if not eve_path.exists():
+        LOGGER.warning(f"EVE file not found: {eve_path}. Skipping alert correlation.")
+        return pd.DataFrame()
+    
+    alerts = []
+    LOGGER.info(f"Loading Suricata alerts from {eve_path}")
+    
+    try:
+        with eve_path.open("r") as handle:
+            iterator = tqdm(handle, desc="Loading alerts") if show_progress else handle
+            for line in iterator:
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                    if event.get("event_type") == "alert":
+                        alert_data = event.get("alert", {})
+                        alerts.append({
+                            "flow_id": event.get("flow_id"),
+                            "timestamp": event.get("timestamp"),
+                            "signature": alert_data.get("signature", ""),
+                            "signature_id": alert_data.get("signature_id"),
+                            "category": alert_data.get("category", ""),
+                            "severity": alert_data.get("severity"),
+                            "src_ip": event.get("src_ip"),
+                            "dst_ip": event.get("dest_ip") or event.get("dst_ip"),
+                            "src_port": event.get("src_port"),
+                            "dst_port": event.get("dest_port"),
+                            "proto": event.get("proto"),
+                        })
+                except json.JSONDecodeError:
+                    continue
+                except Exception as e:
+                    LOGGER.debug(f"Skipping malformed alert: {e}")
+                    continue
+    except Exception as e:
+        LOGGER.warning(f"Error loading alerts from {eve_path}: {e}")
+        return pd.DataFrame()
+    
+    alerts_df = pd.DataFrame(alerts)
+    if not alerts_df.empty:
+        LOGGER.info(f"Loaded {len(alerts_df):,} alerts")
+    return alerts_df
+
+
+def correlate_flows_with_alerts(
+    flows_df: pd.DataFrame, 
+    alerts_df: pd.DataFrame,
+    time_window_seconds: float = 5.0
+) -> pd.DataFrame:
+    """
+    Correlate flows with Suricata alerts based on IPs, ports, protocol, and timestamps.
+    
+    Args:
+        flows_df: DataFrame with flow information (src_ip, dst_ip, src_port, dst_port, protocol, first_seen, last_seen)
+        alerts_df: DataFrame with Suricata alerts
+        time_window_seconds: Time window in seconds for matching timestamps
+    
+    Returns:
+        DataFrame with flows and correlated alert information
+    """
+    if alerts_df.empty:
+        LOGGER.warning("No alerts to correlate")
+        flows_df["alert_count"] = 0
+        flows_df["has_alert"] = False
+        flows_df["alert_signatures"] = ""
+        flows_df["max_alert_severity"] = np.nan
+        return flows_df
+    
+    LOGGER.info("Correlating flows with alerts...")
+    
+    # Convert timestamps to datetime (ensure both are timezone-naive)
+    if "first_seen" in flows_df.columns:
+        flows_df["first_seen_dt"] = pd.to_datetime(flows_df["first_seen"], errors="coerce", unit="ms")
+        flows_df["last_seen_dt"] = pd.to_datetime(flows_df["last_seen"], errors="coerce", unit="ms")
+        # Remove timezone if present - convert to UTC then remove timezone
+        if flows_df["first_seen_dt"].dtype.name.startswith("datetime64"):
+            try:
+                if flows_df["first_seen_dt"].dt.tz is not None:
+                    flows_df["first_seen_dt"] = flows_df["first_seen_dt"].dt.tz_convert("UTC").dt.tz_localize(None)
+            except (AttributeError, TypeError):
+                pass
+        if flows_df["last_seen_dt"].dtype.name.startswith("datetime64"):
+            try:
+                if flows_df["last_seen_dt"].dt.tz is not None:
+                    flows_df["last_seen_dt"] = flows_df["last_seen_dt"].dt.tz_convert("UTC").dt.tz_localize(None)
+            except (AttributeError, TypeError):
+                pass
+    
+    if "timestamp" in alerts_df.columns:
+        alerts_df["timestamp_dt"] = pd.to_datetime(alerts_df["timestamp"], errors="coerce")
+        # Remove timezone if present to match flows_df
+        if alerts_df["timestamp_dt"].dtype.name.startswith("datetime64"):
+            try:
+                if alerts_df["timestamp_dt"].dt.tz is not None:
+                    alerts_df["timestamp_dt"] = alerts_df["timestamp_dt"].dt.tz_convert("UTC").dt.tz_localize(None)
+            except (AttributeError, TypeError):
+                pass
+    
+    # Initialize result columns
+    flows_df["alert_count"] = 0
+    flows_df["has_alert"] = False
+    flows_df["alert_signatures"] = ""
+    flows_df["max_alert_severity"] = np.nan
+    flows_df["alert_categories"] = ""
+    
+    # Match flows with alerts
+    matched_count = 0
+    for idx, flow in tqdm(flows_df.iterrows(), total=len(flows_df), desc="Matching flows"):
+        # Match on IPs, ports, and protocol
+        if "first_seen_dt" in flows_df.columns and "timestamp_dt" in alerts_df.columns:
+            # Time-based matching
+            flow_start = flow.get("first_seen_dt")
+            flow_end = flow.get("last_seen_dt")
+            
+            if pd.notna(flow_start) and pd.notna(flow_end):
+                # Find alerts within time window
+                time_mask = (
+                    (alerts_df["timestamp_dt"] >= flow_start - pd.Timedelta(seconds=time_window_seconds)) &
+                    (alerts_df["timestamp_dt"] <= flow_end + pd.Timedelta(seconds=time_window_seconds))
+                )
+            else:
+                time_mask = pd.Series([True] * len(alerts_df), index=alerts_df.index)
+        else:
+            time_mask = pd.Series([True] * len(alerts_df), index=alerts_df.index)
+        
+        # Match on network identifiers
+        ip_match = (
+            ((alerts_df["src_ip"] == flow.get("src_ip")) & (alerts_df["dst_ip"] == flow.get("dst_ip"))) |
+            ((alerts_df["src_ip"] == flow.get("dst_ip")) & (alerts_df["dst_ip"] == flow.get("src_ip")))
+        )
+        
+        port_match = (
+            ((alerts_df["src_port"] == flow.get("src_port")) & (alerts_df["dst_port"] == flow.get("dst_port"))) |
+            ((alerts_df["src_port"] == flow.get("dst_port")) & (alerts_df["dst_port"] == flow.get("src_port")))
+        )
+        
+        proto_match = True
+        if "proto" in alerts_df.columns and "protocol" in flow:
+            proto_match = alerts_df["proto"] == flow.get("protocol")
+        
+        # Combine all conditions
+        match_mask = time_mask & ip_match & port_match & proto_match
+        matched_alerts = alerts_df[match_mask]
+        
+        if len(matched_alerts) > 0:
+            matched_count += 1
+            flows_df.at[idx, "alert_count"] = len(matched_alerts)
+            flows_df.at[idx, "has_alert"] = True
+            
+            # Collect signatures
+            signatures = matched_alerts["signature"].dropna().unique()
+            flows_df.at[idx, "alert_signatures"] = " | ".join(signatures[:5])  # Limit to 5 signatures
+            
+            # Collect categories
+            categories = matched_alerts["category"].dropna().unique()
+            flows_df.at[idx, "alert_categories"] = " | ".join(categories[:5])
+            
+            # Max severity
+            if "severity" in matched_alerts.columns:
+                max_severity = matched_alerts["severity"].max()
+                flows_df.at[idx, "max_alert_severity"] = max_severity
+    
+    LOGGER.info(f"Matched {matched_count:,} flows ({matched_count/len(flows_df)*100:.1f}%) with alerts")
+    
+    # Clean up temporary columns
+    if "first_seen_dt" in flows_df.columns:
+        flows_df = flows_df.drop(columns=["first_seen_dt", "last_seen_dt"])
+    
+    return flows_df
+
+
+def save_anomalous_flows_by_model(
+    flows_df: pd.DataFrame,
+    predictions_df: pd.DataFrame,
+    output_dir: Path,
+    model_name: str,
+    prediction_column: str,
+    score_column: Optional[str] = None
+):
+    """
+    Save anomalous flows detected by a specific model to CSV.
+    Includes alert correlation information if available.
+    
+    Args:
+        flows_df: DataFrame with flow information and alert correlation
+        predictions_df: DataFrame with model predictions
+        output_dir: Output directory
+        model_name: Name of the model (e.g., "isolation_forest", "autoencoder", "kmeans")
+        prediction_column: Column name in predictions_df with predictions (-1 = anomaly, 1 = normal)
+        score_column: Optional column name with anomaly scores
+    """
+    # Get anomalous flows (prediction == -1)
+    anomaly_mask = predictions_df[prediction_column] == -1
+    anomalous_indices = predictions_df[anomaly_mask].index
+    
+    if len(anomalous_indices) == 0:
+        LOGGER.warning(f"No anomalies detected by {model_name}")
+        return
+    
+    # Get corresponding flows
+    anomalous_flows = flows_df.iloc[anomalous_indices].copy()
+    
+    # Add prediction information
+    anomalous_flows["model"] = model_name
+    anomalous_flows["prediction"] = predictions_df.loc[anomalous_indices, prediction_column].values
+    
+    if score_column and score_column in predictions_df.columns:
+        anomalous_flows["anomaly_score"] = predictions_df.loc[anomalous_indices, score_column].values
+    
+    # Ensure output directory exists
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save to CSV
+    output_file = output_dir / f"anomalous_flows_{model_name}.csv"
+    anomalous_flows.to_csv(output_file, index=False)
+    LOGGER.info(f"Saved {len(anomalous_flows):,} anomalous flows from {model_name} to {output_file}")
+    
+    # Log alert correlation statistics if available
+    if "has_alert" in anomalous_flows.columns:
+        flows_with_alerts = anomalous_flows["has_alert"].sum()
+        LOGGER.info(f"  - {flows_with_alerts:,} flows ({flows_with_alerts/len(anomalous_flows)*100:.1f}%) have associated Suricata alerts")
+
+
+def plot_feature_correlation_matrix(
+    X_scaled: np.ndarray,
+    feature_names: List[str],
+    output_dir: Path,
+    max_features: int = 30
+):
+    """Plot correlation matrix heatmap of features."""
+    LOGGER.info("Creating feature correlation matrix...")
+    
+    # Limit number of features if too many
+    if len(feature_names) > max_features:
+        LOGGER.info(f"Limiting to top {max_features} features for correlation matrix")
+        # Use first max_features features
+        X_subset = X_scaled[:, :max_features]
+        feature_subset = feature_names[:max_features]
+    else:
+        X_subset = X_scaled
+        feature_subset = feature_names
+    
+    # Create DataFrame and compute correlation
+    df = pd.DataFrame(X_subset, columns=feature_subset)
+    corr_matrix = df.corr()
+    
+    # Create figure
+    plt.figure(figsize=(14, 12))
+    
+    # Create heatmap
+    mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)  # Mask upper triangle
+    sns.heatmap(
+        corr_matrix,
+        mask=mask,
+        annot=True,
+        fmt=".2f",
+        cmap="coolwarm",
+        center=0,
+        square=True,
+        linewidths=0.5,
+        cbar_kws={"shrink": 0.8},
+        vmin=-1,
+        vmax=1,
+        annot_kws={"size": 7}
+    )
+    
+    plt.title("Matrice de Corrélation des Features", fontsize=16, fontweight="bold", pad=20)
+    plt.xticks(rotation=45, ha="right", fontsize=9)
+    plt.yticks(rotation=0, fontsize=9)
+    plt.tight_layout()
+    plt.savefig(output_dir / "feature_correlation_matrix.png", dpi=200, bbox_inches="tight")
+    plt.close()
+    LOGGER.info(f"Saved: {output_dir / 'feature_correlation_matrix.png'}")
+
+
+def plot_anomaly_feature_comparison(
+    X_scaled: np.ndarray,
+    predictions_df: pd.DataFrame,
+    feature_names: List[str],
+    output_dir: Path,
+    top_n_features: int = 15
+):
+    """Compare feature values between normal and anomalous flows."""
+    LOGGER.info("Creating anomaly vs normal feature comparison...")
+    
+    # Get anomaly masks
+    if_anomalies = predictions_df["isolation_forest"] == -1
+    ae_anomalies = predictions_df["autoencoder"] == -1
+    both_anomalies = if_anomalies & ae_anomalies
+    
+    # Limit to top features
+    n_features = min(top_n_features, len(feature_names), X_scaled.shape[1])
+    feature_subset = feature_names[:n_features]
+    
+    fig, axes = plt.subplots(2, 2, figsize=(16, 14))
+    
+    # 1. Isolation Forest: Mean feature values comparison
+    ax = axes[0, 0]
+    normal_means = X_scaled[~if_anomalies, :n_features].mean(axis=0)
+    anomaly_means = X_scaled[if_anomalies, :n_features].mean(axis=0)
+    
+    x = np.arange(n_features)
+    width = 0.35
+    ax.bar(x - width/2, normal_means, width, label="Normal", color="green", alpha=0.7, edgecolor="black")
+    ax.bar(x + width/2, anomaly_means, width, label="Anomalie (IF)", color="red", alpha=0.7, edgecolor="black")
+    ax.set_xlabel("Feature", fontsize=11)
+    ax.set_ylabel("Valeur Moyenne (normalisée)", fontsize=11)
+    ax.set_title("Isolation Forest: Comparaison Features Normal vs Anomalie", fontsize=12, fontweight="bold")
+    ax.set_xticks(x)
+    ax.set_xticklabels(feature_subset, rotation=45, ha="right", fontsize=8)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis="y")
+    
+    # 2. Autoencoder: Mean feature values comparison
+    ax = axes[0, 1]
+    normal_means_ae = X_scaled[~ae_anomalies, :n_features].mean(axis=0)
+    anomaly_means_ae = X_scaled[ae_anomalies, :n_features].mean(axis=0)
+    
+    ax.bar(x - width/2, normal_means_ae, width, label="Normal", color="green", alpha=0.7, edgecolor="black")
+    ax.bar(x + width/2, anomaly_means_ae, width, label="Anomalie (AE)", color="purple", alpha=0.7, edgecolor="black")
+    ax.set_xlabel("Feature", fontsize=11)
+    ax.set_ylabel("Valeur Moyenne (normalisée)", fontsize=11)
+    ax.set_title("Autoencoder: Comparaison Features Normal vs Anomalie", fontsize=12, fontweight="bold")
+    ax.set_xticks(x)
+    ax.set_xticklabels(feature_subset, rotation=45, ha="right", fontsize=8)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis="y")
+    
+    # 3. Feature difference (anomaly - normal) for IF
+    ax = axes[1, 0]
+    diff_if = anomaly_means - normal_means
+    colors = ["red" if d > 0 else "blue" for d in diff_if]
+    ax.barh(range(n_features), diff_if, color=colors, alpha=0.7, edgecolor="black")
+    ax.axvline(0, color="black", linestyle="--", linewidth=1)
+    ax.set_xlabel("Différence (Anomalie - Normal)", fontsize=11)
+    ax.set_ylabel("Feature", fontsize=11)
+    ax.set_title("Isolation Forest: Différence des Features", fontsize=12, fontweight="bold")
+    ax.set_yticks(range(n_features))
+    ax.set_yticklabels(feature_subset, fontsize=8)
+    ax.grid(True, alpha=0.3, axis="x")
+    
+    # 4. Feature difference (anomaly - normal) for AE
+    ax = axes[1, 1]
+    diff_ae = anomaly_means_ae - normal_means_ae
+    colors_ae = ["purple" if d > 0 else "blue" for d in diff_ae]
+    ax.barh(range(n_features), diff_ae, color=colors_ae, alpha=0.7, edgecolor="black")
+    ax.axvline(0, color="black", linestyle="--", linewidth=1)
+    ax.set_xlabel("Différence (Anomalie - Normal)", fontsize=11)
+    ax.set_ylabel("Feature", fontsize=11)
+    ax.set_title("Autoencoder: Différence des Features", fontsize=12, fontweight="bold")
+    ax.set_yticks(range(n_features))
+    ax.set_yticklabels(feature_subset, fontsize=8)
+    ax.grid(True, alpha=0.3, axis="x")
+    
+    plt.suptitle("Analyse Comparative des Features: Normal vs Anomalies", 
+                fontsize=16, fontweight="bold", y=0.995)
+    plt.tight_layout()
+    plt.savefig(output_dir / "anomaly_feature_comparison.png", dpi=200, bbox_inches="tight")
+    plt.close()
+    LOGGER.info(f"Saved: {output_dir / 'anomaly_feature_comparison.png'}")
+
+
+def plot_temporal_anomaly_distribution(
+    flows_df: pd.DataFrame,
+    predictions_df: pd.DataFrame,
+    output_dir: Path
+):
+    """Plot temporal distribution of anomalies if timestamp data is available."""
+    LOGGER.info("Creating temporal anomaly distribution...")
+    
+    if flows_df is None or len(flows_df) != len(predictions_df):
+        LOGGER.warning("Cannot create temporal plot: flows_df not available or size mismatch")
+        return
+    
+    # Check for timestamp columns
+    timestamp_cols = ["first_seen", "last_seen", "timestamp", "start_time", "end_time"]
+    available_cols = [col for col in timestamp_cols if col in flows_df.columns]
+    
+    if not available_cols:
+        LOGGER.warning("No timestamp columns found for temporal analysis")
+        return
+    
+    # Use first available timestamp column
+    time_col = available_cols[0]
+    
+    try:
+        # Convert to datetime
+        if time_col in ["first_seen", "last_seen"]:
+            flows_df["time_dt"] = pd.to_datetime(flows_df[time_col], errors="coerce", unit="ms")
+        else:
+            flows_df["time_dt"] = pd.to_datetime(flows_df[time_col], errors="coerce")
+        
+        # Remove invalid timestamps
+        valid_mask = flows_df["time_dt"].notna()
+        flows_valid = flows_df[valid_mask].copy()
+        predictions_valid = predictions_df[valid_mask].copy()
+        
+        if len(flows_valid) == 0:
+            LOGGER.warning("No valid timestamps found")
+            return
+        
+        # Create time bins (hourly)
+        flows_valid["hour"] = flows_valid["time_dt"].dt.floor("H")
+        
+        # Get anomaly masks
+        if_anomalies = (predictions_valid["isolation_forest"] == -1).astype(int)
+        ae_anomalies = (predictions_valid["autoencoder"] == -1).astype(int)
+        
+        # Aggregate by hour
+        hourly_stats = flows_valid.groupby("hour").agg({
+            "time_dt": "count"  # Count flows per hour
+        }).rename(columns={"time_dt": "total_flows"})
+        
+        hourly_stats["if_anomalies"] = flows_valid.groupby("hour")[if_anomalies].sum()
+        hourly_stats["ae_anomalies"] = flows_valid.groupby("hour")[ae_anomalies].sum()
+        hourly_stats["if_anomaly_rate"] = (hourly_stats["if_anomalies"] / hourly_stats["total_flows"] * 100)
+        hourly_stats["ae_anomaly_rate"] = (hourly_stats["ae_anomalies"] / hourly_stats["total_flows"] * 100)
+        
+        fig, axes = plt.subplots(3, 1, figsize=(16, 12))
+        
+        # 1. Total flows over time
+        ax = axes[0]
+        ax.plot(hourly_stats.index, hourly_stats["total_flows"], marker="o", linewidth=2, markersize=4, color="blue")
+        ax.set_xlabel("Temps", fontsize=11)
+        ax.set_ylabel("Nombre de Flows", fontsize=11)
+        ax.set_title("Distribution Temporelle: Volume de Trafic", fontsize=12, fontweight="bold")
+        ax.grid(True, alpha=0.3)
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+        
+        # 2. Anomaly counts over time
+        ax = axes[1]
+        ax.plot(hourly_stats.index, hourly_stats["if_anomalies"], marker="o", linewidth=2, 
+                markersize=4, label="Isolation Forest", color="red", alpha=0.7)
+        ax.plot(hourly_stats.index, hourly_stats["ae_anomalies"], marker="s", linewidth=2, 
+                markersize=4, label="Autoencoder", color="purple", alpha=0.7)
+        ax.set_xlabel("Temps", fontsize=11)
+        ax.set_ylabel("Nombre d'Anomalies", fontsize=11)
+        ax.set_title("Distribution Temporelle: Anomalies Détectées", fontsize=12, fontweight="bold")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+        
+        # 3. Anomaly rate over time
+        ax = axes[2]
+        ax.plot(hourly_stats.index, hourly_stats["if_anomaly_rate"], marker="o", linewidth=2, 
+                markersize=4, label="Isolation Forest", color="red", alpha=0.7)
+        ax.plot(hourly_stats.index, hourly_stats["ae_anomaly_rate"], marker="s", linewidth=2, 
+                markersize=4, label="Autoencoder", color="purple", alpha=0.7)
+        ax.set_xlabel("Temps", fontsize=11)
+        ax.set_ylabel("Taux d'Anomalies (%)", fontsize=11)
+        ax.set_title("Distribution Temporelle: Taux d'Anomalies", fontsize=12, fontweight="bold")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+        
+        plt.suptitle("Analyse Temporelle des Anomalies", fontsize=16, fontweight="bold", y=0.995)
+        plt.tight_layout()
+        plt.savefig(output_dir / "temporal_anomaly_distribution.png", dpi=200, bbox_inches="tight")
+        plt.close()
+        LOGGER.info(f"Saved: {output_dir / 'temporal_anomaly_distribution.png'}")
+        
+    except Exception as e:
+        LOGGER.warning(f"Error creating temporal plot: {e}")
+
+
+def plot_network_statistics(
+    flows_df: pd.DataFrame,
+    predictions_df: pd.DataFrame,
+    output_dir: Path
+):
+    """Plot network statistics for normal vs anomalous flows."""
+    LOGGER.info("Creating network statistics visualizations...")
+    
+    if flows_df is None or len(flows_df) != len(predictions_df):
+        LOGGER.warning("Cannot create network statistics: flows_df not available or size mismatch")
+        return
+    
+    # Get anomaly masks
+    if_anomalies = predictions_df["isolation_forest"] == -1
+    ae_anomalies = predictions_df["autoencoder"] == -1
+    
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # 1. Protocol distribution for IF anomalies
+    ax = axes[0, 0]
+    if "protocol" in flows_df.columns:
+        normal_protocols = flows_df[~if_anomalies]["protocol"].value_counts().head(10)
+        anomaly_protocols = flows_df[if_anomalies]["protocol"].value_counts().head(10)
+        
+        x = np.arange(len(normal_protocols))
+        width = 0.35
+        ax.bar(x - width/2, normal_protocols.values, width, label="Normal", 
+               color="green", alpha=0.7, edgecolor="black")
+        ax.bar(x + width/2, anomaly_protocols.values, width, label="Anomalie (IF)", 
+               color="red", alpha=0.7, edgecolor="black")
+        ax.set_xlabel("Protocole", fontsize=11)
+        ax.set_ylabel("Nombre de Flows", fontsize=11)
+        ax.set_title("Isolation Forest: Distribution par Protocole", fontsize=12, fontweight="bold")
+        ax.set_xticks(x)
+        ax.set_xticklabels(normal_protocols.index, rotation=45, ha="right")
+        ax.legend()
+        ax.grid(True, alpha=0.3, axis="y")
+    else:
+        ax.text(0.5, 0.5, "Colonne 'protocol' non disponible", 
+                ha="center", va="center", transform=ax.transAxes, fontsize=12)
+        ax.set_title("Distribution par Protocole", fontsize=12)
+    
+    # 2. Top source IPs for anomalies
+    ax = axes[0, 1]
+    if "src_ip" in flows_df.columns:
+        anomaly_ips = flows_df[if_anomalies]["src_ip"].value_counts().head(10)
+        if len(anomaly_ips) > 0:
+            ax.barh(range(len(anomaly_ips)), anomaly_ips.values, color="red", alpha=0.7, edgecolor="black")
+            ax.set_yticks(range(len(anomaly_ips)))
+            ax.set_yticklabels(anomaly_ips.index, fontsize=9)
+            ax.set_xlabel("Nombre d'Anomalies", fontsize=11)
+            ax.set_title("Top 10 IPs Sources (Isolation Forest)", fontsize=12, fontweight="bold")
+            ax.grid(True, alpha=0.3, axis="x")
+            ax.invert_yaxis()
+        else:
+            ax.text(0.5, 0.5, "Aucune anomalie trouvée", 
+                    ha="center", va="center", transform=ax.transAxes, fontsize=12)
+    else:
+        ax.text(0.5, 0.5, "Colonne 'src_ip' non disponible", 
+                ha="center", va="center", transform=ax.transAxes, fontsize=12)
+        ax.set_title("Top IPs Sources", fontsize=12)
+    
+    # 3. Port distribution for anomalies
+    ax = axes[1, 0]
+    if "dst_port" in flows_df.columns:
+        normal_ports = flows_df[~if_anomalies]["dst_port"].value_counts().head(15)
+        anomaly_ports = flows_df[if_anomalies]["dst_port"].value_counts().head(15)
+        
+        # Combine and get top ports
+        all_ports = set(normal_ports.index) | set(anomaly_ports.index)
+        top_ports = sorted(list(all_ports))[:15]
+        
+        normal_counts = [normal_ports.get(p, 0) for p in top_ports]
+        anomaly_counts = [anomaly_ports.get(p, 0) for p in top_ports]
+        
+        x = np.arange(len(top_ports))
+        width = 0.35
+        ax.bar(x - width/2, normal_counts, width, label="Normal", 
+               color="green", alpha=0.7, edgecolor="black")
+        ax.bar(x + width/2, anomaly_counts, width, label="Anomalie (IF)", 
+               color="red", alpha=0.7, edgecolor="black")
+        ax.set_xlabel("Port Destination", fontsize=11)
+        ax.set_ylabel("Nombre de Flows", fontsize=11)
+        ax.set_title("Isolation Forest: Distribution par Port Destination", fontsize=12, fontweight="bold")
+        ax.set_xticks(x)
+        ax.set_xticklabels(top_ports, rotation=45, ha="right", fontsize=8)
+        ax.legend()
+        ax.grid(True, alpha=0.3, axis="y")
+    else:
+        ax.text(0.5, 0.5, "Colonne 'dst_port' non disponible", 
+                ha="center", va="center", transform=ax.transAxes, fontsize=12)
+        ax.set_title("Distribution par Port", fontsize=12)
+    
+    # 4. Flow duration comparison
+    ax = axes[1, 1]
+    duration_cols = ["duration", "flow_duration", "last_seen", "first_seen"]
+    duration_col = None
+    for col in duration_cols:
+        if col in flows_df.columns:
+            duration_col = col
+            break
+    
+    if duration_col and duration_col in ["last_seen", "first_seen"]:
+        # Calculate duration
+        if "first_seen" in flows_df.columns and "last_seen" in flows_df.columns:
+            flows_df["duration_ms"] = flows_df["last_seen"] - flows_df["first_seen"]
+            normal_durations = flows_df[~if_anomalies]["duration_ms"] / 1000  # Convert to seconds
+            anomaly_durations = flows_df[if_anomalies]["duration_ms"] / 1000
+            
+            ax.hist(normal_durations, bins=50, alpha=0.6, label="Normal", color="green", edgecolor="black")
+            ax.hist(anomaly_durations, bins=50, alpha=0.6, label="Anomalie (IF)", color="red", edgecolor="black")
+            ax.set_xlabel("Durée du Flow (secondes)", fontsize=11)
+            ax.set_ylabel("Fréquence", fontsize=11)
+            ax.set_title("Distribution de la Durée des Flows", fontsize=12, fontweight="bold")
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            ax.set_xlim(0, normal_durations.quantile(0.99))  # Limit to 99th percentile for visibility
+    elif duration_col:
+        normal_durations = flows_df[~if_anomalies][duration_col]
+        anomaly_durations = flows_df[if_anomalies][duration_col]
+        
+        ax.hist(normal_durations, bins=50, alpha=0.6, label="Normal", color="green", edgecolor="black")
+        ax.hist(anomaly_durations, bins=50, alpha=0.6, label="Anomalie (IF)", color="red", edgecolor="black")
+        ax.set_xlabel(f"Durée ({duration_col})", fontsize=11)
+        ax.set_ylabel("Fréquence", fontsize=11)
+        ax.set_title("Distribution de la Durée des Flows", fontsize=12, fontweight="bold")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+    else:
+        ax.text(0.5, 0.5, "Colonne de durée non disponible", 
+                ha="center", va="center", transform=ax.transAxes, fontsize=12)
+        ax.set_title("Distribution de Durée", fontsize=12)
+    
+    plt.suptitle("Statistiques Réseau: Normal vs Anomalies", 
+                fontsize=16, fontweight="bold", y=0.995)
+    plt.tight_layout()
+    plt.savefig(output_dir / "network_statistics.png", dpi=200, bbox_inches="tight")
+    plt.close()
+    LOGGER.info(f"Saved: {output_dir / 'network_statistics.png'}")
+
+
 def plot_model_agreement(predictions_df: pd.DataFrame, output_dir: Path):
     """Visualize agreement between models."""
     LOGGER.info("Creating model agreement visualizations...")
@@ -419,6 +1255,8 @@ def evaluate_models(
     preprocessor_path: Path,
     models_dir: Path,
     output_dir: Path,
+    original_flows_path: Optional[Path] = None,
+    eve_json_path: Optional[Path] = None,
 ) -> Dict:
     """Main evaluation function."""
     
@@ -458,6 +1296,54 @@ def evaluate_models(
     else:
         top_features = feature_names[: min(6, len(feature_names))]
 
+    # Load original flows and correlate with alerts if provided
+    flows_df = None
+    if original_flows_path and original_flows_path.exists():
+        LOGGER.info(f"Loading original flows from {original_flows_path}")
+        flows_df = pd.read_csv(original_flows_path)
+        LOGGER.info(f"Loaded {len(flows_df):,} original flows")
+        
+        # Ensure flows_df has the same number of rows as predictions_df
+        if len(flows_df) != len(predictions_df):
+            LOGGER.warning(f"Flow count mismatch: {len(flows_df)} flows vs {len(predictions_df)} predictions")
+            # If flows_df is longer, truncate to match predictions
+            if len(flows_df) > len(predictions_df):
+                flows_df = flows_df.iloc[:len(predictions_df)].reset_index(drop=True)
+                LOGGER.info(f"Truncated flows to {len(flows_df):,} to match predictions")
+            # If flows_df is shorter, we can't proceed with correlation
+            elif len(flows_df) < len(predictions_df):
+                LOGGER.error("Cannot correlate: fewer flows than predictions")
+                flows_df = None
+        
+        # Load and correlate alerts if eve.json is provided
+        if flows_df is not None and eve_json_path and eve_json_path.exists():
+            LOGGER.info(f"Loading Suricata alerts from {eve_json_path}")
+            alerts_df = load_suricata_alerts(eve_json_path, show_progress=True)
+            
+            if not alerts_df.empty:
+                LOGGER.info("Correlating flows with Suricata alerts...")
+                flows_df = correlate_flows_with_alerts(flows_df, alerts_df, time_window_seconds=5.0)
+            else:
+                LOGGER.warning("No alerts found in eve.json")
+                # Initialize alert columns anyway
+                flows_df["alert_count"] = 0
+                flows_df["has_alert"] = False
+                flows_df["alert_signatures"] = ""
+                flows_df["max_alert_severity"] = np.nan
+                flows_df["alert_categories"] = ""
+        elif flows_df is not None:
+            # Initialize alert columns if no eve.json provided
+            flows_df["alert_count"] = 0
+            flows_df["has_alert"] = False
+            flows_df["alert_signatures"] = ""
+            flows_df["max_alert_severity"] = np.nan
+            flows_df["alert_categories"] = ""
+    else:
+        if original_flows_path:
+            LOGGER.warning(f"Original flows file not found: {original_flows_path}")
+        else:
+            LOGGER.info("No original flows path provided; skipping alert correlation")
+
     # Create visualizations
     plot_isolation_forest_results(predictions_df, output_dir)
     plot_kmeans_results(predictions_df, X_scaled, feature_names, output_dir)
@@ -468,6 +1354,58 @@ def evaluate_models(
     if top_features:
         plot_feature_distributions(X_scaled, predictions_df, feature_names, output_dir, top_features)
     plot_score_relationship(predictions_df, output_dir)
+    
+    # New visualizations
+    plot_feature_correlation_matrix(X_scaled, feature_names, output_dir, max_features=30)
+    plot_anomaly_feature_comparison(X_scaled, predictions_df, feature_names, output_dir, top_n_features=15)
+    
+    # Plot anomaly-alert correlation if flows and alerts are available
+    if flows_df is not None and len(flows_df) == len(predictions_df):
+        plot_anomaly_alert_correlation(flows_df, predictions_df, output_dir, top_n=20)
+        plot_temporal_anomaly_distribution(flows_df, predictions_df, output_dir)
+        plot_network_statistics(flows_df, predictions_df, output_dir)
+    
+    # Save anomalous flows by model if flows_df is available
+    if flows_df is not None:
+        LOGGER.info("=" * 60)
+        LOGGER.info("Saving Anomalous Flows by Model")
+        LOGGER.info("=" * 60)
+        
+        # Create directory for anomalous flows
+        anomalous_flows_dir = output_dir / "anomalous_flows"
+        anomalous_flows_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save for each model
+        save_anomalous_flows_by_model(
+            flows_df, predictions_df, anomalous_flows_dir,
+            "isolation_forest", "isolation_forest", "isolation_forest_score"
+        )
+        save_anomalous_flows_by_model(
+            flows_df, predictions_df, anomalous_flows_dir,
+            "autoencoder", "autoencoder", "autoencoder_reconstruction_error"
+        )
+        
+        # For K-Means, we'll save flows from the smallest cluster(s) as anomalies
+        # Typically, smaller clusters are more likely to be anomalies
+        cluster_sizes = predictions_df["kmeans_cluster"].value_counts()
+        if len(cluster_sizes) > 1:
+            # Consider smallest cluster as anomaly
+            smallest_cluster = cluster_sizes.idxmin()
+            kmeans_anomaly_mask = predictions_df["kmeans_cluster"] == smallest_cluster
+            kmeans_anomaly_indices = predictions_df[kmeans_anomaly_mask].index
+            
+            if len(kmeans_anomaly_indices) > 0:
+                kmeans_anomalous_flows = flows_df.iloc[kmeans_anomaly_indices].copy()
+                kmeans_anomalous_flows["model"] = "kmeans"
+                kmeans_anomalous_flows["cluster"] = predictions_df.loc[kmeans_anomaly_indices, "kmeans_cluster"].values
+                
+                output_file = anomalous_flows_dir / "anomalous_flows_kmeans.csv"
+                kmeans_anomalous_flows.to_csv(output_file, index=False)
+                LOGGER.info(f"Saved {len(kmeans_anomalous_flows):,} flows from smallest K-Means cluster to {output_file}")
+                
+                if "has_alert" in kmeans_anomalous_flows.columns:
+                    flows_with_alerts = kmeans_anomalous_flows["has_alert"].sum()
+                    LOGGER.info(f"  - {flows_with_alerts:,} flows ({flows_with_alerts/len(kmeans_anomalous_flows)*100:.1f}%) have associated Suricata alerts")
     
     # Calculate evaluation metrics
     if_anomalies = (predictions_df["isolation_forest"] == -1).sum()
@@ -506,6 +1444,20 @@ def evaluate_models(
         },
     }
     
+    # Add alert correlation statistics if available
+    if flows_df is not None and "has_alert" in flows_df.columns:
+        total_with_alerts = flows_df["has_alert"].sum()
+        if_anomalies_with_alerts = flows_df.loc[predictions_df["isolation_forest"] == -1, "has_alert"].sum() if len(flows_df) == len(predictions_df) else 0
+        ae_anomalies_with_alerts = flows_df.loc[predictions_df["autoencoder"] == -1, "has_alert"].sum() if len(flows_df) == len(predictions_df) else 0
+        
+        evaluation["alert_correlation"] = {
+            "total_flows_with_alerts": int(total_with_alerts),
+            "if_anomalies_with_alerts": int(if_anomalies_with_alerts),
+            "ae_anomalies_with_alerts": int(ae_anomalies_with_alerts),
+            "if_anomaly_alert_rate": float(if_anomalies_with_alerts / if_anomalies) if if_anomalies > 0 else 0.0,
+            "ae_anomaly_alert_rate": float(ae_anomalies_with_alerts / ae_anomalies) if ae_anomalies > 0 else 0.0,
+        }
+    
     # Save evaluation JSON
     with open(output_dir / "evaluation.json", "w") as f:
         json.dump(evaluation, f, indent=2)
@@ -517,6 +1469,15 @@ def evaluate_models(
     LOGGER.info(f"K-Means: {n_clusters} clusters")
     LOGGER.info(f"Autoencoder: {ae_anomalies:,} anomalies ({ae_anomalies/len(predictions_df)*100:.2f}%)")
     LOGGER.info(f"Model Agreement: {evaluation['model_agreement']['agreement_rate']*100:.1f}%")
+    
+    if flows_df is not None and "has_alert" in flows_df.columns:
+        total_with_alerts = flows_df["has_alert"].sum()
+        LOGGER.info(f"Alert Correlation: {total_with_alerts:,} flows ({total_with_alerts/len(flows_df)*100:.1f}%) have Suricata alerts")
+        if_anomalies_with_alerts = flows_df.loc[predictions_df["isolation_forest"] == -1, "has_alert"].sum() if len(flows_df) == len(predictions_df) else 0
+        ae_anomalies_with_alerts = flows_df.loc[predictions_df["autoencoder"] == -1, "has_alert"].sum() if len(flows_df) == len(predictions_df) else 0
+        LOGGER.info(f"  - IF anomalies with alerts: {if_anomalies_with_alerts:,} ({if_anomalies_with_alerts/if_anomalies*100:.1f}%)" if if_anomalies > 0 else "  - IF anomalies with alerts: 0")
+        LOGGER.info(f"  - AE anomalies with alerts: {ae_anomalies_with_alerts:,} ({ae_anomalies_with_alerts/ae_anomalies*100:.1f}%)" if ae_anomalies > 0 else "  - AE anomalies with alerts: 0")
+    
     LOGGER.info(f"Results saved to: {output_dir}")
     
     return evaluation
@@ -532,10 +1493,20 @@ def main():
     parser.add_argument("--preprocessor", type=Path, required=True, help="Path to preprocessor.joblib")
     parser.add_argument("--models-dir", type=Path, required=True, help="Directory containing trained models")
     parser.add_argument("--output-dir", type=Path, required=True, help="Output directory for plots")
+    parser.add_argument("--original-flows", type=Path, default=None, help="Path to original_flows.csv (for alert correlation)")
+    parser.add_argument("--eve-json", type=Path, default=None, help="Path to eve.json file (for Suricata alert correlation)")
 
     args = parser.parse_args()
 
-    evaluate_models(args.predictions, args.X_scaled, args.preprocessor, args.models_dir, args.output_dir)
+    evaluate_models(
+        args.predictions, 
+        args.X_scaled, 
+        args.preprocessor, 
+        args.models_dir, 
+        args.output_dir,
+        original_flows_path=args.original_flows,
+        eve_json_path=args.eve_json,
+    )
 
 
 if __name__ == "__main__":

@@ -201,11 +201,25 @@ def preprocess_flows(
     # Load and combine
     df = load_and_combine_flows(attack_path, benign_path)
     
+    # Save original flows (before any preprocessing) for correlation with alerts
+    output_dir.mkdir(parents=True, exist_ok=True)
+    # Keep identifying columns that will be used for correlation
+    identifying_cols = ["src_ip", "dst_ip", "src_port", "dst_port", "protocol", 
+                        "first_seen", "last_seen", "packets", "bytes"]
+    # Only save columns that exist
+    available_cols = [col for col in identifying_cols if col in df.columns]
+    original_flows = df[available_cols].copy()
+    original_flows.to_csv(output_dir / "original_flows.csv", index=False)
+    LOGGER.info(f"Saved original flows metadata ({len(available_cols)} columns) to {output_dir / 'original_flows.csv'}")
+    
     # Downsample if requested
     if sample_rate is not None and sample_rate < 1.0:
         original_size = len(df)
         df = df.sample(frac=sample_rate, random_state=42).reset_index(drop=True)
         LOGGER.info(f"Downsampled: {original_size:,} -> {len(df):,} flows ({sample_rate*100:.1f}%)")
+        # Also downsample original_flows to match
+        original_flows = original_flows.sample(frac=sample_rate, random_state=42).reset_index(drop=True)
+        original_flows.to_csv(output_dir / "original_flows.csv", index=False)
     
     # Handle missing values
     df = handle_missing_values(df)

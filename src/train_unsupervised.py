@@ -263,8 +263,9 @@ def train_all_models(
     contamination: float = 0.1,
     k_range: Tuple[int, int] = (2, 10),
     autoencoder_epochs: int = 50,
+    optimized_params_path: Path = None,
 ) -> Dict:
-    """Train all three models."""
+    """Train all three models, optionally using optimized hyperparameters."""
     
     # Load preprocessed data
     LOGGER.info(f"Loading preprocessed data from {X_path}")
@@ -273,8 +274,32 @@ def train_all_models(
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Load optimized parameters if provided
+    optimized_params = None
+    if optimized_params_path and optimized_params_path.exists():
+        LOGGER.info(f"Loading optimized hyperparameters from {optimized_params_path}")
+        try:
+            optimized_params = joblib.load(optimized_params_path)
+            LOGGER.info("Using optimized hyperparameters")
+        except Exception as e:
+            LOGGER.warning(f"Failed to load optimized parameters: {e}. Using defaults.")
+            optimized_params = None
+    
     # Train Isolation Forest
-    if_model = train_isolation_forest(X, contamination)
+    if optimized_params and optimized_params.get("isolation_forest") and optimized_params["isolation_forest"] is not None:
+        if_params = optimized_params["isolation_forest"]["best_params"]
+        LOGGER.info(f"Using optimized IF parameters: {if_params}")
+        if_model = IsolationForest(
+            contamination=if_params["contamination"],
+            n_estimators=if_params["n_estimators"],
+            max_samples=if_params["max_samples"],
+            max_features=if_params["max_features"],
+            random_state=42,
+            n_jobs=-1,
+        )
+        if_model.fit(X)
+    else:
+        if_model = train_isolation_forest(X, contamination)
     joblib.dump(if_model, output_dir / "isolation_forest.joblib")
     
     # Get IF predictions
@@ -282,14 +307,46 @@ def train_all_models(
     if_scores = if_model.score_samples(X)
     
     # Train K-Means
-    kmeans_model, best_k = train_kmeans(X, k_range)
+    if optimized_params and optimized_params.get("kmeans") and optimized_params["kmeans"] is not None:
+        kmeans_params = optimized_params["kmeans"]["best_params"]
+        LOGGER.info(f"Using optimized K-Means parameters: {kmeans_params}")
+        kmeans_model = KMeans(
+            n_clusters=kmeans_params["n_clusters"],
+            n_init=kmeans_params["n_init"],
+            max_iter=kmeans_params["max_iter"],
+            algorithm=kmeans_params["algorithm"],
+            random_state=42,
+            n_jobs=-1,
+        )
+        kmeans_model.fit(X)
+        best_k = kmeans_params["n_clusters"]
+    else:
+        kmeans_model, best_k = train_kmeans(X, k_range)
     joblib.dump(kmeans_model, output_dir / "kmeans.joblib")
     
     # Get K-Means predictions
     kmeans_labels = kmeans_model.predict(X)
     
     # Train Autoencoder
-    ae_model, ae_info = train_autoencoder(X, epochs=autoencoder_epochs)
+    if optimized_params and optimized_params.get("autoencoder") and optimized_params["autoencoder"] is not None:
+        ae_params = optimized_params["autoencoder"]["best_params"]
+        LOGGER.info(f"Using optimized Autoencoder parameters")
+        input_dim = X.shape[1]
+        latent_dim = max(8, int(input_dim * ae_params["latent_dim_ratio"]))
+        hidden_dim1 = max(16, int(input_dim * ae_params["hidden_dim1_ratio"]))
+        hidden_dim2 = max(8, int(input_dim * ae_params["hidden_dim2_ratio"]))
+        hidden_dims = [hidden_dim1, hidden_dim2]
+        
+        ae_model, ae_info = train_autoencoder(
+            X,
+            latent_dim=latent_dim,
+            hidden_dims=hidden_dims,
+            epochs=ae_params["epochs"],
+            batch_size=ae_params["batch_size"],
+            learning_rate=ae_params["learning_rate"],
+        )
+    else:
+        ae_model, ae_info = train_autoencoder(X, epochs=autoencoder_epochs)
     torch.save(ae_model.state_dict(), output_dir / "autoencoder.pth")
     joblib.dump(ae_info, output_dir / "autoencoder_info.joblib")
     
@@ -334,6 +391,7 @@ def main():
     parser.add_argument("--k-min", type=int, default=2, help="K-Means minimum k")
     parser.add_argument("--k-max", type=int, default=10, help="K-Means maximum k")
     parser.add_argument("--ae-epochs", type=int, default=50, help="Autoencoder training epochs")
+    parser.add_argument("--optimized-params", type=Path, default=None, help="Path to optimized hyperparameters file")
 
     args = parser.parse_args()
 
@@ -343,6 +401,7 @@ def main():
         args.contamination,
         (args.k_min, args.k_max),
         args.ae_epochs,
+        optimized_params_path=args.optimized_params,
     )
 
 
