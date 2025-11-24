@@ -7,7 +7,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Tuple
 
 import joblib
 import matplotlib
@@ -85,7 +85,7 @@ def plot_isolation_forest_results(predictions_df: pd.DataFrame, output_dir: Path
     LOGGER.info(f"Saved: {output_dir / 'isolation_forest_analysis.png'}")
 
 
-def plot_kmeans_results(predictions_df: pd.DataFrame, X_scaled: np.ndarray, output_dir: Path):
+def plot_kmeans_results(predictions_df: pd.DataFrame, X_scaled: np.ndarray, feature_names: List[str], output_dir: Path):
     """Visualize K-Means clustering results."""
     LOGGER.info("Creating K-Means visualizations...")
     
@@ -150,19 +150,26 @@ def plot_kmeans_results(predictions_df: pd.DataFrame, X_scaled: np.ndarray, outp
     ax = axes[1, 1]
     # Select a few key features for visualization
     n_clusters = predictions_df["kmeans_cluster"].nunique()
-    feature_names = [f"Feature_{i}" for i in range(min(10, X_scaled.shape[1]))]
+    feature_display = feature_names[: min(10, len(feature_names))]
+    if not feature_display:
+        feature_display = [f"Feature_{i}" for i in range(min(10, X_scaled.shape[1]))]
     cluster_means = []
     for cluster_id in range(n_clusters):
         cluster_mask = predictions_df["kmeans_cluster"] == cluster_id
         cluster_data = X_scaled[cluster_mask]
-        cluster_means.append(cluster_data[:, :len(feature_names)].mean(axis=0))
+        if len(cluster_data) == 0:
+            cluster_means.append(np.zeros(len(feature_display)))
+        else:
+            cluster_means.append(cluster_data[:, : len(feature_display)].mean(axis=0))
     
     cluster_means = np.array(cluster_means)
     im = ax.imshow(cluster_means, aspect="auto", cmap="viridis")
-    ax.set_xlabel("Feature Index")
+    ax.set_xlabel("Feature")
     ax.set_ylabel("Cluster ID")
     ax.set_title("K-Means: Mean Feature Values per Cluster")
     ax.set_yticks(range(n_clusters))
+    ax.set_xticks(range(len(feature_display)))
+    ax.set_xticklabels(feature_display, rotation=45, ha="right")
     plt.colorbar(im, ax=ax, label="Mean Value")
     
     plt.tight_layout()
@@ -225,6 +232,96 @@ def plot_autoencoder_results(predictions_df: pd.DataFrame, output_dir: Path):
     plt.savefig(output_dir / "autoencoder_analysis.png", dpi=200, bbox_inches="tight")
     plt.close()
     LOGGER.info(f"Saved: {output_dir / 'autoencoder_analysis.png'}")
+
+
+def plot_feature_importance(if_model, feature_names: List[str], output_dir: Path):
+    """Plot Isolation Forest feature importances."""
+    if not hasattr(if_model, "feature_importances_"):
+        LOGGER.warning("Isolation Forest model does not expose feature_importances_")
+        return
+
+    LOGGER.info("Creating feature importance plot...")
+    importances = if_model.feature_importances_
+
+    # Select top features
+    top_n = min(20, len(importances))
+    indices = np.argsort(importances)[::-1][:top_n]
+    top_features = [feature_names[i] for i in indices]
+    top_importances = importances[indices]
+
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x=top_importances, y=top_features, palette="viridis")
+    plt.xlabel("Importance")
+    plt.ylabel("Feature")
+    plt.title("Isolation Forest Feature Importances (Top 20)")
+    plt.tight_layout()
+    plt.savefig(output_dir / "feature_importance.png", dpi=200, bbox_inches="tight")
+    plt.close()
+    LOGGER.info(f"Saved: {output_dir / 'feature_importance.png'}")
+
+
+def plot_feature_distributions(
+    X_scaled: np.ndarray,
+    predictions_df: pd.DataFrame,
+    feature_names: List[str],
+    output_dir: Path,
+    top_features: List[str],
+):
+    """Plot feature distributions for normal vs anomalies."""
+    LOGGER.info("Creating feature distribution plots...")
+
+    data_df = pd.DataFrame(X_scaled, columns=feature_names)
+    data_df["IF_Anomaly"] = (predictions_df["isolation_forest"] == -1).astype(int)
+    data_df["AE_Anomaly"] = (predictions_df["autoencoder"] == -1).astype(int)
+
+    num_features = len(top_features)
+    cols = 2
+    rows = (num_features + 1) // cols
+    plt.figure(figsize=(12, rows * 4))
+
+    for idx, feature in enumerate(top_features):
+        if feature not in data_df.columns:
+            continue
+        ax = plt.subplot(rows, cols, idx + 1)
+        sns.kdeplot(
+            data=data_df, x=feature, hue="IF_Anomaly",
+            palette={0: "green", 1: "red"}, fill=True, common_norm=False, alpha=0.4, ax=ax
+        )
+        ax.set_title(f"Feature Distribution: {feature}")
+        ax.set_xlabel("Scaled Value")
+        ax.set_ylabel("Density")
+        ax.legend(["Normal", "Anomaly"])
+        ax.grid(True, alpha=0.2)
+
+    plt.tight_layout()
+    plt.savefig(output_dir / "feature_distributions.png", dpi=200, bbox_inches="tight")
+    plt.close()
+    LOGGER.info(f"Saved: {output_dir / 'feature_distributions.png'}")
+
+
+def plot_score_relationship(predictions_df: pd.DataFrame, output_dir: Path):
+    """Plot relationship between IF scores and AE reconstruction errors."""
+    LOGGER.info("Creating score relationship plot...")
+
+    plt.figure(figsize=(10, 6))
+    scatter = plt.scatter(
+        predictions_df["isolation_forest_score"],
+        predictions_df["autoencoder_reconstruction_error"],
+        c=(predictions_df["isolation_forest"] == -1).astype(int),
+        cmap="coolwarm",
+        alpha=0.3,
+        s=5,
+    )
+    plt.xlabel("Isolation Forest Score (lower = anomalous)")
+    plt.ylabel("Autoencoder Reconstruction Error")
+    plt.title("Isolation Forest vs Autoencoder Agreement")
+    cbar = plt.colorbar(scatter, ticks=[0, 1])
+    cbar.ax.set_yticklabels(["Normal", "Anomaly"])
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_dir / "if_vs_ae_scores.png", dpi=200, bbox_inches="tight")
+    plt.close()
+    LOGGER.info(f"Saved: {output_dir / 'if_vs_ae_scores.png'}")
 
 
 def plot_model_agreement(predictions_df: pd.DataFrame, output_dir: Path):
@@ -319,6 +416,8 @@ def plot_model_agreement(predictions_df: pd.DataFrame, output_dir: Path):
 def evaluate_models(
     predictions_path: Path,
     X_scaled_path: Path,
+    preprocessor_path: Path,
+    models_dir: Path,
     output_dir: Path,
 ) -> Dict:
     """Main evaluation function."""
@@ -329,18 +428,46 @@ def evaluate_models(
     
     # Load predictions and data
     predictions_df = pd.read_csv(predictions_path)
-    X_scaled = pd.read_csv(X_scaled_path).values
+    X_scaled_df = pd.read_csv(X_scaled_path)
+    X_scaled = X_scaled_df.values
     
     LOGGER.info(f"Loaded {len(predictions_df):,} predictions")
     LOGGER.info(f"Data shape: {X_scaled.shape}")
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Load models and preprocessor metadata
+    feature_names = X_scaled_df.columns.tolist()
+    if preprocessor_path.exists():
+        preprocessor = joblib.load(preprocessor_path)
+        feature_names = preprocessor.get("feature_names", feature_names)
+    else:
+        LOGGER.warning(f"Preprocessor file not found: {preprocessor_path}")
+
+    if_model = None
+    if models_dir.joinpath("isolation_forest.joblib").exists():
+        if_model = joblib.load(models_dir / "isolation_forest.joblib")
+    else:
+        LOGGER.warning("Isolation Forest model not found; skipping feature importance plot")
+
+    # Determine top features from IF importance if available
+    if if_model is not None and hasattr(if_model, "feature_importances_"):
+        importances = if_model.feature_importances_
+        top_indices = np.argsort(importances)[::-1][: min(6, len(importances))]
+        top_features = [feature_names[i] for i in top_indices]
+    else:
+        top_features = feature_names[: min(6, len(feature_names))]
+
     # Create visualizations
     plot_isolation_forest_results(predictions_df, output_dir)
-    plot_kmeans_results(predictions_df, X_scaled, output_dir)
+    plot_kmeans_results(predictions_df, X_scaled, feature_names, output_dir)
     plot_autoencoder_results(predictions_df, output_dir)
     plot_model_agreement(predictions_df, output_dir)
+    if if_model is not None:
+        plot_feature_importance(if_model, feature_names, output_dir)
+    if top_features:
+        plot_feature_distributions(X_scaled, predictions_df, feature_names, output_dir, top_features)
+    plot_score_relationship(predictions_df, output_dir)
     
     # Calculate evaluation metrics
     if_anomalies = (predictions_df["isolation_forest"] == -1).sum()
@@ -402,11 +529,13 @@ def main():
     )
     parser.add_argument("--predictions", type=Path, required=True, help="Path to predictions.csv")
     parser.add_argument("--X-scaled", type=Path, required=True, help="Path to X_scaled.csv")
+    parser.add_argument("--preprocessor", type=Path, required=True, help="Path to preprocessor.joblib")
+    parser.add_argument("--models-dir", type=Path, required=True, help="Directory containing trained models")
     parser.add_argument("--output-dir", type=Path, required=True, help="Output directory for plots")
 
     args = parser.parse_args()
 
-    evaluate_models(args.predictions, args.X_scaled, args.output_dir)
+    evaluate_models(args.predictions, args.X_scaled, args.preprocessor, args.models_dir, args.output_dir)
 
 
 if __name__ == "__main__":

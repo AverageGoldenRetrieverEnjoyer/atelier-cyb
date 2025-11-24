@@ -114,4 +114,6 @@ evaluate-unsupervised:
 	$(PYTHON) $(SRC)/evaluate_models.py \
 		--predictions $(OUTPUT_DIR)/models/predictions.csv \
 		--X-scaled $(OUTPUT_DIR)/preprocessed/X_scaled.csv \
+		--preprocessor $(OUTPUT_DIR)/preprocessed/preprocessor.joblib \
+		--models-dir $(OUTPUT_DIR)/models \
 		--output-dir $(OUTPUT_DIR)/plots

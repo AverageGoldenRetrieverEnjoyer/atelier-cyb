@@ -157,6 +157,8 @@ def main():
             "src/evaluate_models.py",
             "--predictions", str(models_dir / "predictions.csv"),
             "--X-scaled", str(preprocessed_dir / "X_scaled.csv"),
+            "--preprocessor", str(preprocessed_dir / "preprocessor.joblib"),
+            "--models-dir", str(models_dir),
             "--output-dir", str(plots_dir),
         ]
         
