@@ -8,3 +8,12 @@ seaborn
 # Progress & utils
 tqdm
 joblib
+
+# Flow extraction
+nfstream
+
+# Deep learning
+torch
+
+# Visualization
+scikit-learn  # for PCA, t-SNE

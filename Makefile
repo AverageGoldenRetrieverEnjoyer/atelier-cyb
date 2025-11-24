@@ -10,7 +10,8 @@ EVE_SAMPLE := $(DATA_DIR)/eve_sample.json
 
 ANOMALY_PIPELINE := $(SRC)/anomaly_pipeline.py
 
-.PHONY: all demo full install merge-data check-integrity fix-corrupted connect clean
+.PHONY: all demo full install merge-data check-integrity fix-corrupted connect clean \
+	unsupervised-pipeline extract-flows preprocess-flows train-unsupervised evaluate-unsupervised
 
 all: install prepare_data
 
@@ -75,3 +76,42 @@ download-benin:
 	./scripts/download_benin.sh
 
 prepare_data: import-data check-integrity fix-corrupted download-benin merge-data
+
+# Unsupervised ML Pipeline
+ATTACK_PCAP := $(DATA_DIR)/attack_data.pcap
+BENIGN_PCAP := $(DATA_DIR)/benign_data.pcap
+
+unsupervised-pipeline:
+	@echo ">>> Running complete unsupervised intrusion detection pipeline"
+	@echo "    This will: extract flows → preprocess → train → evaluate"
+	$(PYTHON) $(SRC)/run_unsupervised_pipeline.py \
+		--attack-pcap $(ATTACK_PCAP) \
+		--benign-pcap $(BENIGN_PCAP) \
+		--output-base $(OUTPUT_DIR)
+
+extract-flows:
+	@echo ">>> Extracting flows from PCAP files"
+	$(PYTHON) $(SRC)/pcap_to_flows.py \
+		--attack-pcap $(ATTACK_PCAP) \
+		--benign-pcap $(BENIGN_PCAP) \
+		--output-dir $(OUTPUT_DIR)/flows
+
+preprocess-flows:
+	@echo ">>> Preprocessing flow data"
+	$(PYTHON) $(SRC)/preprocess_flows.py \
+		--attack-flows $(OUTPUT_DIR)/flows/attack_flows.csv \
+		--benign-flows $(OUTPUT_DIR)/flows/benign_flows.csv \
+		--output-dir $(OUTPUT_DIR)/preprocessed
+
+train-unsupervised:
+	@echo ">>> Training unsupervised models (IF, K-Means, Autoencoder)"
+	$(PYTHON) $(SRC)/train_unsupervised.py \
+		--X-scaled $(OUTPUT_DIR)/preprocessed/X_scaled.csv \
+		--output-dir $(OUTPUT_DIR)/models
+
+evaluate-unsupervised:
+	@echo ">>> Evaluating and visualizing models"
+	$(PYTHON) $(SRC)/evaluate_models.py \
+		--predictions $(OUTPUT_DIR)/models/predictions.csv \
+		--X-scaled $(OUTPUT_DIR)/preprocessed/X_scaled.csv \
+		--output-dir $(OUTPUT_DIR)/plots
