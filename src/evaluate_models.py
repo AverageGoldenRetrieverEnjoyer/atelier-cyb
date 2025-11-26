@@ -605,6 +605,7 @@ def correlate_flows_with_alerts(
 ) -> pd.DataFrame:
     """
     Correlate flows with Suricata alerts based on IPs, ports, protocol, and timestamps.
+    Uses vectorized operations for memory efficiency and speed.
     
     Args:
         flows_df: DataFrame with flow information (src_ip, dst_ip, src_port, dst_port, protocol, first_seen, last_seen)
@@ -620,31 +621,30 @@ def correlate_flows_with_alerts(
         flows_df["has_alert"] = False
         flows_df["alert_signatures"] = ""
         flows_df["max_alert_severity"] = np.nan
+        flows_df["alert_categories"] = ""
         return flows_df
     
-    LOGGER.info("Correlating flows with alerts...")
+    LOGGER.info("Correlating flows with alerts (vectorized)...")
+    
+    # Make a copy to avoid modifying original
+    flows_df = flows_df.copy()
+    alerts_df = alerts_df.copy()
     
     # Convert timestamps to datetime (ensure both are timezone-naive)
     if "first_seen" in flows_df.columns:
         flows_df["first_seen_dt"] = pd.to_datetime(flows_df["first_seen"], errors="coerce", unit="ms")
         flows_df["last_seen_dt"] = pd.to_datetime(flows_df["last_seen"], errors="coerce", unit="ms")
-        # Remove timezone if present - convert to UTC then remove timezone
-        if flows_df["first_seen_dt"].dtype.name.startswith("datetime64"):
-            try:
-                if flows_df["first_seen_dt"].dt.tz is not None:
-                    flows_df["first_seen_dt"] = flows_df["first_seen_dt"].dt.tz_convert("UTC").dt.tz_localize(None)
-            except (AttributeError, TypeError):
-                pass
-        if flows_df["last_seen_dt"].dtype.name.startswith("datetime64"):
-            try:
-                if flows_df["last_seen_dt"].dt.tz is not None:
-                    flows_df["last_seen_dt"] = flows_df["last_seen_dt"].dt.tz_convert("UTC").dt.tz_localize(None)
-            except (AttributeError, TypeError):
-                pass
+        # Remove timezone if present
+        for col in ["first_seen_dt", "last_seen_dt"]:
+            if col in flows_df.columns and flows_df[col].dtype.name.startswith("datetime64"):
+                try:
+                    if flows_df[col].dt.tz is not None:
+                        flows_df[col] = flows_df[col].dt.tz_convert("UTC").dt.tz_localize(None)
+                except (AttributeError, TypeError):
+                    pass
     
     if "timestamp" in alerts_df.columns:
         alerts_df["timestamp_dt"] = pd.to_datetime(alerts_df["timestamp"], errors="coerce")
-        # Remove timezone if present to match flows_df
         if alerts_df["timestamp_dt"].dtype.name.startswith("datetime64"):
             try:
                 if alerts_df["timestamp_dt"].dt.tz is not None:
@@ -659,63 +659,104 @@ def correlate_flows_with_alerts(
     flows_df["max_alert_severity"] = np.nan
     flows_df["alert_categories"] = ""
     
-    # Match flows with alerts
-    matched_count = 0
-    for idx, flow in tqdm(flows_df.iterrows(), total=len(flows_df), desc="Matching flows"):
-        # Match on IPs, ports, and protocol
-        if "first_seen_dt" in flows_df.columns and "timestamp_dt" in alerts_df.columns:
-            # Time-based matching
-            flow_start = flow.get("first_seen_dt")
-            flow_end = flow.get("last_seen_dt")
-            
-            if pd.notna(flow_start) and pd.notna(flow_end):
-                # Find alerts within time window
-                time_mask = (
-                    (alerts_df["timestamp_dt"] >= flow_start - pd.Timedelta(seconds=time_window_seconds)) &
-                    (alerts_df["timestamp_dt"] <= flow_end + pd.Timedelta(seconds=time_window_seconds))
-                )
-            else:
-                time_mask = pd.Series([True] * len(alerts_df), index=alerts_df.index)
-        else:
-            time_mask = pd.Series([True] * len(alerts_df), index=alerts_df.index)
-        
-        # Match on network identifiers
-        ip_match = (
-            ((alerts_df["src_ip"] == flow.get("src_ip")) & (alerts_df["dst_ip"] == flow.get("dst_ip"))) |
-            ((alerts_df["src_ip"] == flow.get("dst_ip")) & (alerts_df["dst_ip"] == flow.get("src_ip")))
-        )
-        
-        port_match = (
-            ((alerts_df["src_port"] == flow.get("src_port")) & (alerts_df["dst_port"] == flow.get("dst_port"))) |
-            ((alerts_df["src_port"] == flow.get("dst_port")) & (alerts_df["dst_port"] == flow.get("src_port")))
-        )
-        
-        proto_match = True
-        if "proto" in alerts_df.columns and "protocol" in flow:
-            proto_match = alerts_df["proto"] == flow.get("protocol")
-        
-        # Combine all conditions
-        match_mask = time_mask & ip_match & port_match & proto_match
-        matched_alerts = alerts_df[match_mask]
-        
-        if len(matched_alerts) > 0:
-            matched_count += 1
-            flows_df.at[idx, "alert_count"] = len(matched_alerts)
-            flows_df.at[idx, "has_alert"] = True
-            
-            # Collect signatures
-            signatures = matched_alerts["signature"].dropna().unique()
-            flows_df.at[idx, "alert_signatures"] = " | ".join(signatures[:5])  # Limit to 5 signatures
-            
-            # Collect categories
-            categories = matched_alerts["category"].dropna().unique()
-            flows_df.at[idx, "alert_categories"] = " | ".join(categories[:5])
-            
-            # Max severity
-            if "severity" in matched_alerts.columns:
-                max_severity = matched_alerts["severity"].max()
-                flows_df.at[idx, "max_alert_severity"] = max_severity
+    # Prepare flows for matching - create both directions (normal and reversed)
+    # This handles bidirectional flows (alerts can match either direction)
+    flow_cols = ["src_ip", "dst_ip", "src_port", "dst_port", "protocol", "first_seen_dt", "last_seen_dt"]
+    flows_normal = flows_df[flow_cols].copy()
+    flows_normal["flow_idx"] = flows_normal.index
     
+    # Create reversed version (swap src/dst) - use direct assignment
+    flows_reversed = flows_df[flow_cols].copy()
+    flows_reversed["flow_idx"] = flows_reversed.index
+    # Swap IPs and ports for reversed direction
+    temp_src_ip = flows_reversed["src_ip"].copy()
+    temp_src_port = flows_reversed["src_port"].copy()
+    flows_reversed["src_ip"] = flows_reversed["dst_ip"]
+    flows_reversed["dst_ip"] = temp_src_ip
+    flows_reversed["src_port"] = flows_reversed["dst_port"]
+    flows_reversed["dst_port"] = temp_src_port
+    
+    # Combine both directions
+    flows_for_matching = pd.concat([flows_normal, flows_reversed], ignore_index=True)
+    
+    # Prepare alerts for matching
+    alerts_for_matching = alerts_df[["src_ip", "dst_ip", "src_port", "dst_port", "proto", "timestamp", "timestamp_dt", "signature", "category", "severity"]].copy()
+    
+    # Ensure protocol column names match
+    if "protocol" in flows_for_matching.columns and "proto" in alerts_for_matching.columns:
+        flows_for_matching.rename(columns={"protocol": "proto"}, inplace=True)
+    
+    # Step 1: Match on IPs and ports (vectorized)
+    # First merge on exact IP/port matches
+    LOGGER.info("Step 1/3: Matching on IPs and ports...")
+    merged = flows_for_matching.merge(
+        alerts_for_matching,
+        on=["src_ip", "dst_ip", "src_port", "dst_port", "proto"],
+        how="inner",
+        suffixes=("_flow", "_alert")
+    )
+    
+    if len(merged) == 0:
+        LOGGER.info("No matches found on IP/port/protocol")
+        # Clean up temporary columns
+        if "first_seen_dt" in flows_df.columns:
+            flows_df = flows_df.drop(columns=["first_seen_dt", "last_seen_dt"])
+        return flows_df
+    
+    LOGGER.info(f"Found {len(merged):,} potential matches after IP/port/protocol matching")
+    
+    # Step 2: Filter by time window (vectorized)
+    LOGGER.info("Step 2/3: Filtering by time window...")
+    if "first_seen_dt" in merged.columns and "timestamp_dt" in merged.columns:
+        time_window = pd.Timedelta(seconds=time_window_seconds)
+        time_mask = (
+            merged["timestamp_dt"].notna() &
+            merged["first_seen_dt"].notna() &
+            merged["last_seen_dt"].notna() &
+            (merged["timestamp_dt"] >= merged["first_seen_dt"] - time_window) &
+            (merged["timestamp_dt"] <= merged["last_seen_dt"] + time_window)
+        )
+        merged = merged[time_mask]
+        LOGGER.info(f"Found {len(merged):,} matches after time filtering")
+    
+    if len(merged) == 0:
+        LOGGER.info("No matches found after time filtering")
+        # Clean up temporary columns
+        if "first_seen_dt" in flows_df.columns:
+            flows_df = flows_df.drop(columns=["first_seen_dt", "last_seen_dt"])
+        return flows_df
+    
+    # Step 3: Aggregate alerts per flow (vectorized groupby)
+    LOGGER.info("Step 3/3: Aggregating alerts per flow...")
+    
+    # Group by flow index and aggregate
+    alert_agg = merged.groupby("flow_idx").agg({
+        "signature": lambda x: " | ".join(x.dropna().unique()[:5]),  # Limit to 5 signatures
+        "category": lambda x: " | ".join(x.dropna().unique()[:5]),  # Limit to 5 categories
+        "severity": "max" if "severity" in merged.columns else lambda x: np.nan,
+    }).reset_index()
+    
+    alert_agg.rename(columns={
+        "signature": "alert_signatures",
+        "category": "alert_categories",
+        "severity": "max_alert_severity"
+    }, inplace=True)
+    
+    # Count alerts per flow
+    alert_counts = merged.groupby("flow_idx").size().reset_index(name="alert_count")
+    
+    # Merge aggregations
+    alert_summary = alert_counts.merge(alert_agg, on="flow_idx", how="left")
+    
+    # Update flows_df with alert information (vectorized)
+    flows_df.loc[alert_summary["flow_idx"], "alert_count"] = alert_summary["alert_count"].values
+    flows_df.loc[alert_summary["flow_idx"], "has_alert"] = True
+    flows_df.loc[alert_summary["flow_idx"], "alert_signatures"] = alert_summary["alert_signatures"].fillna("").values
+    flows_df.loc[alert_summary["flow_idx"], "alert_categories"] = alert_summary["alert_categories"].fillna("").values
+    if "max_alert_severity" in alert_summary.columns:
+        flows_df.loc[alert_summary["flow_idx"], "max_alert_severity"] = alert_summary["max_alert_severity"].values
+    
+    matched_count = (flows_df["has_alert"] == True).sum()
     LOGGER.info(f"Matched {matched_count:,} flows ({matched_count/len(flows_df)*100:.1f}%) with alerts")
     
     # Clean up temporary columns
