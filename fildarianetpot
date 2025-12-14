@@ -1,0 +1,28 @@
+Logique logs tpot : 
+
+On a les logs dans kibana pour SSH et tout ca mais le traffic est encrypte et pas forcement utile de le garder dans le pcap (dans la mesure ou ca va etre que utile si ca detecte une anomalie dans le flow). 
+
+On doit exporter la data, pour pas avoir a se connecter en VPN a chaque fois, on doit faire un exporter qui synchronise la donnee avec un serveur distant ou un drive quelconque.
+
+Ensuite on fait une big pipeline, qui prend la donnee en entree et preprocess comme vu ci-dessous : 
+
+Donc on garde tous les pcaps sans filtre.
+
+Ensuite on nourrie le premier model avec ces flow (meme ceux contenant la donnee encryptee)
+On peut deja faire 2 models : 
+    - Detection d'anomalies (regression logistique)
+    - Categorisation binaire d'attaque en labelisant avec attaque/benin.
+    - Categorisation precise en labelisant avec les alertes Suricata, mais pour ca besoin d'enrichir les features (en rajoutant la payload si necessaire)
+
+On peut linker les flows avec les pcap en se basant sur les flow id. 
+On peut ensuite extraire les payloads depuis le pcap pour avoir ces details la. 
+
+Ce model pourra detecter les anomalies (unsupervised) OU detecter les attaques en les correlant avec les logs dans ELK
+On pourra extraire la donne decryptee (car ressortant du service directement qui decrypte) pour labeliser la donnee du model flow. 
+
+Le model de detection de payload lui prendra les logs en raw text (payload pour les services non encryptes) ou les logs de elk pour les services non encryptes. 
+
+On stock des logs dans la kibana, et on stock les pcaps pour tous les services.
+
+CORRELATION est le mot d'ordre.
+    

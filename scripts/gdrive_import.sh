@@ -16,7 +16,6 @@ RCLONE_OPTS=(
   --timeout=300s
   --ignore-existing
   --verbose
-  --max-age=1d
   --min-age=5m
 )
 

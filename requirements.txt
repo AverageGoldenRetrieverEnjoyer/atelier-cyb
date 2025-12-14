@@ -17,3 +17,7 @@ torch
 
 # Hyperparameter optimization
 optuna
+
+# Boosting models (for hybrid IDS ensemble)
+xgboost
+lightgbm

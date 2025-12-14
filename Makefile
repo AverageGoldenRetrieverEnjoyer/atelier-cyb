@@ -17,10 +17,9 @@ all: install prepare_data
 
 install:
 	@echo ">>> Installing dependencies"
-	$(PYTHON) -m venv venv	
-	source venv/bin/activate	
+	$(PYTHON) -m venv venv
 	@echo ">>> Installing dependencies"
-	$(PYTHON) -m pip install -r requirements.txt
+	. venv/bin/activate && $(PYTHON) -m pip install -r requirements.txt
 
 merge-data:
 	@echo ">>> Merging split compressed data files"

@@ -1,0 +1,35 @@
+pcap-log:                                                                                                                                                                                 
+      enabled: yes                                                                                                                                                                            
+      filename: log-%t-%s.pcap                                                                                                                                                                
+                                                                                                                                                                                              
+      # File size limit.  Can be specified in kb, mb, gb.  Just a number                                                                                                                      
+      # is parsed as bytes.                                                                                                                                                                   
+      limit: 1000mb                                                                                                                                                                           
+                                                                                                                                                                                              
+      # If set to a value, ring buffer mode is enabled. Will keep maximum of                                                                                                                  
+      # "max-files" of size "limit"                                                                                                                                                           
+      max-files: 50                                                                                                                                                                           
+                                                                                                                                                                                              
+      # Compression algorithm for pcap files. Possible values: none, lz4.                                                                                                                     
+      # Enabling compression is incompatible with the sguil mode. Note also                                                                                                                   
+      # that on Windows, enabling compression will *increase* disk I/O.                                                                                                                       
+      compression: lz4                                                                                                                                                                        
+                                                                                                                                                                                              
+      # Further options for lz4 compression. The compression level can be set                                                                                                                 
+      # to a value between 0 and 16, where higher values result in higher                                                                                                                     
+      # compression.                                                                                                                                                                          
+      lz4-checksum: yes                                                                                                                                                                       
+      lz4-level: 9                                                                                                                                                                            
+                                                                                                                                                                                              
+      mode: normal # normal, multi or sguil.                                                                                                                                                  
+                                                                                                                                                                                              
+      # Directory to place pcap files. If not provided the default log                                                                                                                        
+      # directory will be used. Required for "sguil" mode.                                                                                                                                    
+      #dir:                                                                                                                                                                                   
+                                                                                                                                                                                              
+      #ts-format: usec # sec or usec second format (default) is filename.sec usec is filename.sec.usec                                                                                        
+      use-stream-depth: no #If set to "yes" packets seen after reaching stream inspection depth are ignored. "no" logs all packets                                                            
+      honor-pass-rules: no # If set to "yes", flows in which a pass rule matched will stop being logged.                                                                                      
+      # Use "all" to log all packets or use "alerts" to log only alerted packets and flows or "tag"                                                                                           
+      # to log only flow tagged via the "tag" keyword                                                                                                                                         
+      conditional: all
